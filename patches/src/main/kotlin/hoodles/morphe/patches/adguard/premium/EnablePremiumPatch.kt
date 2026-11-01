@@ -20,33 +20,40 @@ val enablePremiumPatch = bytecodePatch(
     compatibleWith(Compat.ADGUARD)
 
     execute {
-        val licenseTypeClass = PaidLicenseFingerprint.method.parameters[1].type
+        val ctorParams = PaidLicenseFingerprint.method.parameters
+        require(ctorParams.size >= 3) {
+            "PaidLicense constructor has only ${ctorParams.size} parameters. " +
+                "The patch assumes ≥ 3 (licenseKey, licenseType, duration|boolean). " +
+                "Please report this on the Hoodles issue tracker."
+        }
 
-        // Walk through the fingerprints from strict to permissive.
-        val lifetimeDurationClass = runCatching { LifetimeDurationFingerprint.classDef }
-            .recoverCatching { LifetimeDurationUpperFingerprint.classDef }
-            .recoverCatching { LifetimeDurationSpacedFingerprint.classDef }
-            .recoverCatching { LifetimeDurationFallbackFingerprint.classDef }
-            .getOrElse { throwable ->
-                error(
-                    "Could not locate the Lifetime duration enum in this APK. " +
-                        "Tried: toString+['Lifetime'], toString+['LIFETIME'], " +
-                        "toString+['Life time'], any+['Lifetime']. " +
-                        "Original cause: ${throwable.message}"
-                )
-            }
+        val licenseTypeClass = ctorParams[1].type
+        val durationType     = ctorParams[2].type
 
-        // Do NOT blindly take staticFields.first() — that's what broke on TV.
-        // Prefer a field literally called "Lifetime"; fall back to whatever is first.
-        val lifetimeDurationInstance = lifetimeDurationClass.staticFields
-            .firstOrNull { it.name.equals("Lifetime", ignoreCase = true) }
-            ?: lifetimeDurationClass.staticFields.firstOrNull { !it.name.startsWith("$") }
-            ?: lifetimeDurationClass.staticFields.firstOrNull()
-            ?: error(
-                "Class ${lifetimeDurationClass.type} was located, but it has no " +
-                    "static fields to use as the Lifetime enum entry. " +
-                    "Please report this on the Hoodles issue tracker."
-            )
+        // Build the argument for the "duration / lifetime" slot.
+        //   boolean (Z)          → const/4 v3, 0x1     (true)
+        //   class type (L…;)      → sget-object v3, <enum-constant>
+        val durationArg: String = if (durationType == "Z") {
+            // 4.7.179+ shape: lifetime is a boolean flag, no enum to fetch.
+            "const/4 v3, 0x1"
+        } else {
+            // Older shape: static enum constant.
+            val durationClass = runCatching { LifetimeDurationFingerprint.classDef }
+                .recoverCatching { LifetimeDurationLowerFingerprint.classDef }
+                .getOrElse { t ->
+                    error(
+                        "Could not locate the Duration class. Tried " +
+                            "toString+['Lifetime'] and any+[', lifetime=']. " +
+                            "Original cause: ${t.message}"
+                    )
+                }
+
+            val instance = durationClass.staticFields
+                .firstOrNull { it.name.equals("Lifetime", true) }
+                ?: durationClass.staticFields.first()
+
+            "sget-object v3, $instance"
+        }
 
         val getPaidLicenseMethod = ImmutableMethod(
             GetPlusStateFingerprint.classDef.type,
@@ -62,7 +69,7 @@ val enablePremiumPatch = bytecodePatch(
                 new-instance v0, ${PaidLicenseFingerprint.classDef.type}
                 const-string v1, ""
                 sget-object v2, $licenseTypeClass->Personal:$licenseTypeClass
-                sget-object v3, $lifetimeDurationInstance
+                $durationArg
                 const/4 v4, 0x1
                 const/4 v5, 0x3
                 const-string v6, ""
