@@ -20,24 +20,41 @@ val enablePremiumPatch = bytecodePatch(
     compatibleWith(Compat.ADGUARD)
 
     execute {
-        val ctorParams   = PaidLicenseFingerprint.method.parameters
-        val licenseType  = ctorParams[1].type
-        val durationType = ctorParams[2].type
+        val ctorParams = PaidLicenseFingerprint.method.parameters
+        require(ctorParams.size == 5) {
+            "Expected PaidLicense.<init> with 5 params " +
+                "(String, LicenseType, Duration, int, int). " +
+                "Found ${ctorParams.size}. This patch targets AdGuard 4.7.179+."
+        }
 
-        // 4.7.179+ : 3rd param is boolean lifetime  -> const/4 v3, 0x1
-        // ≤ 4.3.x  : 3rd param is Duration enum     -> sget-object v3, Duration.Lifetime
-        val durationArg: String = if (durationType == "Z") {
-            "const/4 v3, 0x1"
-        } else {
+        val licenseClass  = PaidLicenseFingerprint.classDef.type   // Lj0/i$k;
+        val licenseType   = ctorParams[1].type                     // Lj0/i$j;
+        val durationType  = ctorParams[2].type                     // Lj0/i$i;
+
+        // Duration is a sealed interface on 4.7.179:
+        //   Lj0/i$i$a  = Lifetime             (singleton, INSTANCE field `a`)
+        //   Lj0/i$i$b  = Unknown              (singleton, INSTANCE field `a`)
+        //   Lj0/i$i$c  = WithExpirationDate(Date)
+        // R8 orders member classes alphabetically by original source name,
+        // so `$a` = Lifetime, `$b` = Unknown, `$c` = WithExpirationDate.
+        //
+        // On legacy builds (≤ 4.3.x) Duration is an enum and this branch
+        // never runs (LifetimeDurationFingerprint matches first).
+        val durationArg: String = runCatching {
             val cls = LifetimeDurationFingerprint.classDef
             val field = cls.staticFields.firstOrNull {
                 it.name.equals("Lifetime", ignoreCase = true)
-            } ?: error(
-                "Located Duration class ${cls.type}, but no `Lifetime` static field. " +
-                    "Please report this on the Hoodles issue tracker."
-            )
+            } ?: error("Legacy Duration enum has no Lifetime field.")
             "sget-object v3, $field"
+        }.getOrElse {
+            val durationBare = durationType.removePrefix("L").removeSuffix(";")  // j0/i$i
+            val lifetimeType = "L${durationBare}\$a;"                            // Lj0/i$i$a;
+            "sget-object v3, $lifetimeType->a:$lifetimeType"
         }
+
+        val ctorRef =
+            "$licenseClass-><init>(Ljava/lang/String;$licenseType$durationType" +
+                "II)V"
 
         val getPaidLicense = ImmutableMethod(
             GetPlusStateFingerprint.classDef.type,
@@ -47,17 +64,16 @@ val enablePremiumPatch = bytecodePatch(
             AccessFlags.STATIC.value,
             null,
             null,
-            MutableMethodImplementation(7)
+            MutableMethodImplementation(6)
         ).toMutable().apply {
             addInstructions(0, """
-                new-instance v0, ${PaidLicenseFingerprint.classDef.type}
+                new-instance v0, $licenseClass
                 const-string v1, ""
                 sget-object v2, $licenseType->Personal:$licenseType
                 $durationArg
                 const/4 v4, 0x1
                 const/4 v5, 0x3
-                const-string v6, ""
-                invoke-direct/range {v0 .. v6}, ${PaidLicenseFingerprint.method}
+                invoke-direct/range {v0 .. v5}, $ctorRef
                 return-object v0
             """.trimIndent())
         }
