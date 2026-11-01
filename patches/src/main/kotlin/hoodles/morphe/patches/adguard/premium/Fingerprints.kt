@@ -40,15 +40,11 @@ object PaidLicenseFingerprint : Fingerprint(
     name = "<init>"
 )
 
-/* ---------- Duration lookup: PascalCase (old) + lowercase (4.7+) ---------- */
-
-// Original — used only if the 3rd ctor param is still a class type.
+/**
+ * Only used by pre-4.7 builds where the 3rd ctor param is a Duration enum.
+ * Never evaluated on 4.7.179 (where the 3rd param is boolean `Z`).
+ */
 object LifetimeDurationFingerprint : Fingerprint(
     name = "toString",
     strings = listOf("Lifetime")
-)
-
-// 4.7.179 fallback — data class toString fragment or lowercase constant.
-object LifetimeDurationLowerFingerprint : Fingerprint(
-    strings = listOf(", lifetime=")
 )
