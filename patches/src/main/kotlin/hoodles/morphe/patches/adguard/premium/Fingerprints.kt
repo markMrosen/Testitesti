@@ -40,10 +40,9 @@ object PaidLicenseFingerprint : Fingerprint(
     name = "<init>"
 )
 
-/**
- * Only used by pre-4.7 builds where the 3rd ctor param is a Duration enum.
- * Never evaluated on 4.7.179 (where the 3rd param is boolean `Z`).
- */
+// Only evaluated on legacy builds (≤ 4.3.x) where Duration is an enum
+// with a `Lifetime` constant. On 4.7.179+ the patch derives the lifetime
+// object from the constructor signature and never touches this fingerprint.
 object LifetimeDurationFingerprint : Fingerprint(
     name = "toString",
     strings = listOf("Lifetime")
