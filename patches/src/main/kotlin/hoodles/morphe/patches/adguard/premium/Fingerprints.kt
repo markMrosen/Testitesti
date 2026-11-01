@@ -40,27 +40,15 @@ object PaidLicenseFingerprint : Fingerprint(
     name = "<init>"
 )
 
-/* ---------- Lifetime / Duration lookup, from strict to permissive ---------- */
+/* ---------- Duration lookup: PascalCase (old) + lowercase (4.7+) ---------- */
 
-// Original target (mobile AdGuard). Kept first so nothing changes for existing builds.
+// Original — used only if the 3rd ctor param is still a class type.
 object LifetimeDurationFingerprint : Fingerprint(
     name = "toString",
     strings = listOf("Lifetime")
 )
 
-// TV build may capitalise the display string differently.
-object LifetimeDurationUpperFingerprint : Fingerprint(
-    name = "toString",
-    strings = listOf("LIFETIME")
-)
-
-object LifetimeDurationSpacedFingerprint : Fingerprint(
-    name = "toString",
-    strings = listOf("Life time")
-)
-
-// Last resort: any method in a class that contains the "Lifetime" string.
-// Ambiguity is handled in EnablePremiumPatch by picking the field name.
-object LifetimeDurationFallbackFingerprint : Fingerprint(
-    strings = listOf("Lifetime")
+// 4.7.179 fallback — data class toString fragment or lowercase constant.
+object LifetimeDurationLowerFingerprint : Fingerprint(
+    strings = listOf(", lifetime=")
 )
